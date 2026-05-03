@@ -123,6 +123,66 @@ body {
   50% { transform: translateY(-3px) rotate(3deg); }
 }
 
+/* hall of fame */
+.hall-of-fame {
+  background: linear-gradient(135deg, rgba(20,8,32,0.92), rgba(50,18,72,0.85));
+  border: 1px solid rgba(255,210,63,0.25);
+  border-radius: 18px; padding: 18px 22px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.hof-header {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin-bottom: 14px;
+}
+.hof-title {
+  font-family: 'Russo One', sans-serif; font-size: 14px; letter-spacing: 0.16em;
+  color: #FFD23F; text-shadow: 0 0 12px rgba(255,210,63,0.4);
+}
+.hof-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.hof-card {
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(0,0,0,0.4));
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; padding: 14px 16px;
+}
+.hof-card-month {
+  font-family: 'Russo One', sans-serif; font-size: 14px; letter-spacing: 0.12em;
+  color: rgba(255,210,63,0.9);
+  margin-bottom: 10px; text-align: center;
+}
+.hof-card-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.hof-card-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: 10px;
+  background: linear-gradient(90deg, color-mix(in oklab, var(--kc) 22%, transparent), transparent 90%);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 12px;
+}
+.hof-card-row.winner {
+  border-color: #FFD23F;
+  box-shadow: 0 0 0 1px #FFD23F, 0 4px 12px rgba(255,210,63,0.25);
+}
+.hof-name {
+  font-family: 'Russo One', sans-serif; font-style: italic;
+  font-size: 14px; flex: 1; letter-spacing: 0.04em;
+}
+.hof-stat {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(0,0,0,0.5); padding: 3px 8px; border-radius: 999px;
+  font-size: 11px;
+}
+.hof-stat b { color: #FFD23F; font-size: 13px; }
+.hof-crown { font-size: 16px; }
+.hof-card-result {
+  font-family: 'Russo One', sans-serif; font-size: 12px; letter-spacing: 0.12em;
+  text-align: center; color: #FFD23F;
+  padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);
+}
+.hof-card-result.tied { color: #9BF6FF; }
+
 /* lane */
 .lanes { display: flex; flex-direction: column; gap: 18px; }
 .lane {
@@ -622,6 +682,11 @@ body {
   .tb-btn { font-size: 10px; padding: 7px 10px; gap: 5px; }
   .topbar-controls { gap: 6px; }
 
+  /* hall of fame */
+  .hall-of-fame { padding: 12px 14px; }
+  .hof-grid { grid-template-columns: 1fr; gap: 10px; }
+  .hof-title { font-size: 11px; letter-spacing: 0.1em; }
+
   /* standings */
   .standings { padding: 12px 14px; }
   .standings-header { gap: 10px; margin-bottom: 10px; }
@@ -777,8 +842,14 @@ const STICKERS = [
 const MONTHLY_GOAL = 100;
 const MAX_DAILY = CHORES.reduce((s, c) => s + c.points, 0); // 8
 
-function buildMonth() {
-  const year = 2026, month = 4; // May
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildMonthForKey(key) {
+  const [year, month1] = key.split("-").map(Number);
+  const month = month1 - 1;
   const first = new Date(year, month, 1);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const startDow = (first.getDay() + 6) % 7; // Mon = 0
@@ -786,18 +857,15 @@ function buildMonth() {
   for (let i = 0; i < startDow; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
-  return { cells, daysInMonth, year, month, startDow };
+  const name = new Date(year, month, 1)
+    .toLocaleString("en-US", { month: "long", year: "numeric" })
+    .toUpperCase();
+  return { cells, daysInMonth, year, month, startDow, name };
 }
 
-const MONTH = buildMonth();
-const MONTH_NAME = "MAY 2026";
-
-function getTodayDay() {
-  const now = new Date();
-  if (now.getFullYear() === 2026 && now.getMonth() === 4) return now.getDate();
-  return null;
-}
-const TODAY_DAY = getTodayDay();
+const MONTH = buildMonthForKey(currentMonthKey());
+const MONTH_NAME = MONTH.name;
+const TODAY_DAY = new Date().getDate();
 
 const STORAGE_KEY = "kidcal:v4";
 
@@ -810,31 +878,67 @@ function emptyStickers() {
   return out;
 }
 
+function emptyMonthData(monthInfo) {
+  const m = { stars: {}, stickers: {} };
+  for (const k of KIDS) {
+    m.stars[k.id] = {};
+    for (let d = 1; d <= monthInfo.daysInMonth; d++) {
+      m.stars[k.id][d] = {};
+      for (const c of CHORES) m.stars[k.id][d][c.id] = false;
+    }
+    m.stickers[k.id] = {};
+    for (const s of STICKERS) m.stickers[k.id][s.id] = 0;
+  }
+  return m;
+}
+
+// Migrate any stored shape to the current archive-aware shape AND auto-roll
+// to the current real-world month if needed.
+function migrate(s) {
+  s = s ? { ...s } : {};
+  // Old shape: stars/stickers at root, no currentKey. Treat as May 2026 (the original month).
+  if (!s.currentKey) s.currentKey = "2026-05";
+  if (!s.archive) s.archive = {};
+
+  const todayKey = currentMonthKey();
+
+  // Auto-roll: if stored month is older than today's month, archive it and start fresh
+  if (s.currentKey !== todayKey) {
+    s.archive[s.currentKey] = {
+      stars: s.stars || {},
+      stickers: s.stickers || emptyStickers(),
+    };
+    const fresh = emptyMonthData(MONTH);
+    s.stars = fresh.stars;
+    s.stickers = fresh.stickers;
+    s.currentKey = todayKey;
+  }
+
+  // Backfill any missing kids/days/stickers in the active month (handles new chores/stickers being added)
+  if (!s.stars) s.stars = {};
+  if (!s.stickers) s.stickers = {};
+  for (const k of KIDS) {
+    if (!s.stars[k.id]) s.stars[k.id] = {};
+    for (let d = 1; d <= MONTH.daysInMonth; d++) {
+      if (!s.stars[k.id][d]) s.stars[k.id][d] = {};
+      for (const c of CHORES) {
+        if (typeof s.stars[k.id][d][c.id] !== "boolean") s.stars[k.id][d][c.id] = false;
+      }
+    }
+    if (!s.stickers[k.id]) s.stickers[k.id] = {};
+    for (const st of STICKERS) {
+      if (typeof s.stickers[k.id][st.id] !== "number") s.stickers[k.id][st.id] = 0;
+    }
+  }
+  return s;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (!s.stickers) s.stickers = emptyStickers();
-      // backfill missing kids/stickers from older saves
-      for (const k of KIDS) {
-        if (!s.stickers[k.id]) s.stickers[k.id] = {};
-        for (const st of STICKERS) {
-          if (typeof s.stickers[k.id][st.id] !== "number") s.stickers[k.id][st.id] = 0;
-        }
-      }
-      return s;
-    }
+    if (raw) return migrate(JSON.parse(raw));
   } catch (e) {}
-  const empty = { stars: {}, stickers: emptyStickers() };
-  for (const k of KIDS) {
-    empty.stars[k.id] = {};
-    for (let d = 1; d <= MONTH.daysInMonth; d++) {
-      empty.stars[k.id][d] = {};
-      for (const c of CHORES) empty.stars[k.id][d][c.id] = false;
-    }
-  }
-  return empty;
+  return migrate({});
 }
 
 function saveState(s) {
@@ -1445,6 +1549,74 @@ function Standings({ state }) {
   );
 }
 
+function archivedTotals(monthData) {
+  const out = {};
+  for (const k of KIDS) {
+    let stars = 0;
+    const sd = monthData?.stars?.[k.id];
+    if (sd) {
+      for (const day of Object.keys(sd)) {
+        for (const c of CHORES) if (sd[day]?.[c.id]) stars += c.points;
+      }
+    }
+    let stickers = 0;
+    const st = monthData?.stickers?.[k.id];
+    if (st) for (const s of STICKERS) stickers += st[s.id] || 0;
+    out[k.id] = { stars, stickers };
+  }
+  return out;
+}
+
+function HallOfFame({ state }) {
+  const months = Object.entries(state.archive || {})
+    .filter(([key]) => /^\d{4}-\d{2}$/.test(key))
+    .sort(([a], [b]) => b.localeCompare(a)); // most recent first
+  if (months.length === 0) return null;
+  return (
+    <div className="hall-of-fame">
+      <div className="hof-header">
+        <Checker width={80} height={10} />
+        <div className="hof-title">🏆 HALL OF FAME · PAST MONTHS</div>
+        <Checker width={80} height={10} />
+      </div>
+      <div className="hof-grid">
+        {months.map(([key, data]) => {
+          const totals = archivedTotals(data);
+          const sorted = [...KIDS].sort((a, b) => totals[b.id].stars - totals[a.id].stars);
+          const tied = totals[sorted[0].id].stars === totals[sorted[1].id].stars;
+          const winner = tied ? null : sorted[0];
+          const info = buildMonthForKey(key);
+          return (
+            <div key={key} className="hof-card">
+              <div className="hof-card-month">{info.name}</div>
+              <div className="hof-card-rows">
+                {KIDS.map(kid => {
+                  const t = totals[kid.id];
+                  const isWinner = winner && winner.id === kid.id;
+                  return (
+                    <div key={kid.id} className={`hof-card-row ${isWinner ? "winner" : ""}`}
+                      style={{ "--kc": kid.color }}>
+                      <span className="hof-name">{kid.name}</span>
+                      <span className="hof-stat"><ChromeStar size={12} lit /> <b>{t.stars}</b></span>
+                      <span className="hof-stat">🎯 <b>{t.stickers}</b></span>
+                      {isWinner && <span className="hof-crown">👑</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={`hof-card-result ${tied ? "tied" : ""}`}>
+                {tied
+                  ? "⚡ TIED"
+                  : <>🏆 <span style={{ color: winner.color }}>{winner.name}</span> WINS</>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -1462,25 +1634,6 @@ function App() {
   function closePopover() { setPopover(null); }
 
   // ─── Firestore sync ─────────────────────────────────────────────────────────
-  // Normalize remote payload so older docs (no stickers field) don't blow up.
-  function normalizeRemote(remote) {
-    const out = { stars: remote.stars || {}, stickers: remote.stickers || {} };
-    for (const k of KIDS) {
-      if (!out.stickers[k.id]) out.stickers[k.id] = {};
-      for (const s of STICKERS) {
-        if (typeof out.stickers[k.id][s.id] !== "number") out.stickers[k.id][s.id] = 0;
-      }
-      if (!out.stars[k.id]) out.stars[k.id] = {};
-      for (let d = 1; d <= MONTH.daysInMonth; d++) {
-        if (!out.stars[k.id][d]) out.stars[k.id][d] = {};
-        for (const c of CHORES) {
-          if (typeof out.stars[k.id][d][c.id] !== "boolean") out.stars[k.id][d][c.id] = false;
-        }
-      }
-    }
-    return out;
-  }
-
   const skipNextSave = useRef(false);
   const hasInitialSync = useRef(false); // true once we've heard from Firestore
   const stateRef = useRef(state);
@@ -1495,7 +1648,7 @@ function App() {
         hasInitialSync.current = true;
         return;
       }
-      const remote = normalizeRemote(snap.data() || {});
+      const remote = migrate(snap.data() || {});
       hasInitialSync.current = true;
       if (JSON.stringify(remote) === JSON.stringify(stateRef.current)) return;
       skipNextSave.current = true;
@@ -1620,17 +1773,14 @@ function App() {
   }
 
   function resetMonth() {
-    if (!confirm("Clear ALL stars for this month? Both kids, every day. (Stickers stay.)")) return;
+    if (!confirm("Clear ALL stars for THIS month? Both kids, every day. (Stickers and Hall of Fame stay.)")) return;
     setState(prev => {
-      const empty = { stars: {}, stickers: prev.stickers || emptyStickers() };
-      for (const k of KIDS) {
-        empty.stars[k.id] = {};
-        for (let d = 1; d <= MONTH.daysInMonth; d++) {
-          empty.stars[k.id][d] = {};
-          for (const c of CHORES) empty.stars[k.id][d][c.id] = false;
-        }
-      }
-      return empty;
+      const fresh = emptyMonthData(MONTH);
+      return {
+        ...prev,
+        stars: fresh.stars,
+        stickers: prev.stickers || emptyStickers(),
+      };
     });
   }
 
@@ -1683,6 +1833,8 @@ function App() {
             />
           ))}
         </main>
+
+        <HallOfFame state={state} />
 
         <footer className="footer">
           <div className="footer-legend">
