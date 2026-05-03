@@ -609,6 +609,122 @@ body {
   .driver-name { font-size: 32px; }
   .brand-title { font-size: 22px; }
 }
+
+/* TABLET / MOBILE */
+@media (max-width: 760px) {
+  .page-content { padding: 14px 12px 28px; gap: 14px; }
+
+  /* topbar */
+  .topbar { padding: 12px 14px; gap: 10px; }
+  .brand-mark svg { width: 32px !important; height: 32px !important; }
+  .brand-title { font-size: 18px; letter-spacing: 0.06em; }
+  .brand-sub { font-size: 9px; letter-spacing: 0.12em; }
+  .tb-btn { font-size: 10px; padding: 7px 10px; gap: 5px; }
+  .topbar-controls { gap: 6px; }
+
+  /* standings */
+  .standings { padding: 12px 14px; }
+  .standings-header { gap: 10px; margin-bottom: 10px; }
+  .standings-title { font-size: 12px; letter-spacing: 0.12em; }
+  .stand-row { padding: 8px 10px; gap: 8px; }
+  .stand-name { font-size: 14px; }
+  .stand-car { font-size: 9px; }
+  .stand-stat { font-size: 11px; padding: 4px 8px; }
+  .stand-stat b { font-size: 13px; }
+  .stand-pos { font-size: 16px; min-width: 28px; }
+  .stand-crown { font-size: 9px; padding: 2px 8px; right: 8px; top: -8px; }
+
+  /* lane */
+  .lane { border-radius: 16px; }
+  .lane-banner { padding: 14px 16px; gap: 10px; min-height: auto; }
+  .driver-num { font-size: 36px; }
+  .driver-name { font-size: 22px; margin-bottom: 8px; }
+  .driver-tag { font-size: 9px; padding: 3px 7px; letter-spacing: 0.16em; }
+  .driver-stats { gap: 4px; }
+  .stat-pill { font-size: 10px; padding: 3px 8px; gap: 4px; }
+  .stat-stage { font-size: 9px; }
+  .lane-driver { gap: 12px; width: 100%; }
+  .lane-car { align-self: center; }
+  .lane-car > div { width: 200px !important; }
+
+  /* track */
+  .lane-track { padding: 12px 16px 10px; }
+  .track-tape { height: 44px; }
+  .track-tape-line { right: 44px; }
+  .track-tape-finish { width: 22px; }
+  .track-pos-car img { width: 36px !important; height: 36px !important; }
+  .track-pos-label { font-size: 9px; }
+  .track-meta { font-size: 8px; }
+
+  /* sticker shelf */
+  .sticker-shelf { padding: 12px 16px 14px; }
+  .sticker-shelf-tag { font-size: 9px; letter-spacing: 0.16em; margin-bottom: 8px; }
+  .sticker-row { gap: 6px; }
+  .sticker { font-size: 10px; padding: 6px 10px 6px 8px; gap: 5px; }
+  .sticker-icon { font-size: 14px; }
+  .sticker-count { font-size: 9px; padding: 1px 5px; }
+  .sticker-minus { width: 18px; height: 18px; font-size: 13px; }
+
+  /* calendar — fluid grid, fills lane */
+  .lane-month { padding: 12px 10px 14px; }
+  .cal-head, .cal-grid {
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    justify-content: stretch;
+  }
+  .cal-dow { font-size: 8px; letter-spacing: 0.1em; padding: 2px 0; }
+  .cal-cell {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    padding: 4px;
+    border-width: 1.5px;
+    border-radius: 6px;
+  }
+  .cal-cell-num { font-size: 13px; }
+  .cal-cell-pts { font-size: 8px; padding: 1px 4px; gap: 2px; }
+  .cal-cell-flag { font-size: 11px; bottom: 2px; right: 2px; }
+  .cal-cell-now { font-size: 6px; padding: 1px 3px; top: 2px; right: 2px; }
+
+  /* burst — smaller on mobile so it doesn't dominate */
+  .burst-star svg, .burst-emoji { transform-origin: center; }
+  .burst-emoji { font-size: 32px; }
+  .burst-plus { font-size: 20px; }
+
+  /* footer */
+  .footer { padding: 12px 14px; gap: 8px; flex-direction: column; align-items: flex-start; }
+  .footer-legend { gap: 10px; }
+  .leg-item { font-size: 10px; letter-spacing: 0.06em; }
+  .footer-hint { font-size: 10px; }
+
+  /* popover */
+  .quick-pop { width: calc(100vw - 24px); max-width: 360px; }
+  .quick-pop-name { font-size: 16px; }
+  .quick-chip-label { font-size: 12px; }
+
+  /* modal */
+  .modal { padding: 22px 18px; }
+  .modal-title { font-size: 16px; }
+  .modal-input { font-size: 28px; padding: 10px 0; }
+}
+
+/* SMALL PHONES */
+@media (max-width: 420px) {
+  .page-content { padding: 10px 8px 22px; }
+  .driver-num { font-size: 28px; }
+  .driver-name { font-size: 18px; }
+  .lane-car > div { width: 160px !important; }
+  .lane-banner { padding: 12px; }
+  .lane-track { padding: 10px 12px 8px; }
+  .lane-month { padding: 10px 6px 12px; }
+  .cal-head, .cal-grid { gap: 3px; }
+  .cal-cell { padding: 3px; border-radius: 5px; }
+  .cal-cell-num { font-size: 11px; }
+  .cal-cell-pts { font-size: 7px; }
+  .cal-cell-flag { font-size: 9px; }
+  .sticker-shelf { padding: 10px 12px; }
+  .sticker { font-size: 9px; padding: 5px 8px 5px 7px; }
+  .sticker-icon { font-size: 12px; }
+}
 </style>
 </head>
 <body>
