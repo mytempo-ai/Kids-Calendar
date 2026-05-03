@@ -243,6 +243,75 @@ body {
   margin-top: 12px; padding: 0 4px;
 }
 
+/* sticker shelf */
+.sticker-shelf {
+  padding: 14px 28px 16px;
+  background: linear-gradient(180deg, rgba(20,8,32,0.4), rgba(8,4,14,0.55));
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.sticker-shelf-tag {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700;
+  font-size: 10px; letter-spacing: 0.22em;
+  color: rgba(255,210,63,0.7);
+  margin-bottom: 10px;
+}
+.sticker-row {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  align-items: center;
+}
+.sticker {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 14px 9px 12px;
+  border-radius: 999px;
+  font-family: 'Russo One', sans-serif;
+  font-size: 13px; letter-spacing: 0.08em;
+  background: var(--sg, linear-gradient(135deg, #444, #222));
+  color: var(--st, #fff);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  font-style: italic;
+}
+.sticker:hover:not(:disabled) { transform: translateY(-2px) scale(1.04); box-shadow: 0 10px 24px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.3); }
+.sticker:disabled { cursor: default; }
+.sticker.ghost {
+  background: transparent;
+  color: rgba(255,255,255,0.5);
+  border: 1.5px dashed rgba(255,255,255,0.25);
+  box-shadow: none;
+  font-style: normal;
+}
+.sticker.ghost:hover:not(:disabled) {
+  border-color: rgba(255,210,63,0.6);
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.04);
+}
+.sticker-icon { font-size: 18px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4)); }
+.sticker-label { line-height: 1; }
+.sticker-count {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700;
+  font-size: 12px; letter-spacing: 0.04em;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.2);
+  margin-left: 2px;
+}
+.sticker-minus {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  font-family: 'Russo One', sans-serif; font-size: 16px; line-height: 1;
+  background: rgba(0,0,0,0.55); color: #fff;
+  border-radius: 50%;
+  margin-left: 4px;
+  border: 1px solid rgba(255,255,255,0.25);
+  cursor: pointer;
+  transition: background 0.12s, transform 0.12s;
+}
+.sticker-minus:hover { background: #FF1A30; transform: scale(1.1); }
+
 /* month + chore pane */
 .lane-month { padding: 18px 22px 22px; background: rgba(0,0,0,0.2); }
 .cal-pane { width: 100%; }
@@ -581,6 +650,14 @@ const KIDS = [
   { id: "tigran", name: "TIGRAN", num: "02", color: "#2EC4B6", colorDark: "#063532", accent: "#9BF6FF", car: "Aerion V12" },
 ];
 
+const STICKERS = [
+  { id: "hardworker", label: "HARD WORKER", icon: "💪", grad: "linear-gradient(135deg, #FFD23F, #FF8855)",  tone: "#08040E" },
+  { id: "brainpower", label: "BRAIN POWER", icon: "🧠", grad: "linear-gradient(135deg, #9BF6FF, #2EC4B6)",  tone: "#08040E" },
+  { id: "discipline", label: "DISCIPLINE",  icon: "⚡", grad: "linear-gradient(135deg, #FF6A7A, #FF1A30)",  tone: "#fff"    },
+  { id: "newrecord",  label: "NEW RECORD",  icon: "🏆", grad: "linear-gradient(135deg, #FFFAD0, #FFB060)",  tone: "#08040E" },
+  { id: "diaper",     label: "DIAPER",      icon: "👶", grad: "linear-gradient(135deg, #FFCFE4, #FF99CC)",  tone: "#5A0A2A" },
+];
+
 const MONTHLY_GOAL = 100;
 const MAX_DAILY = CHORES.reduce((s, c) => s + c.points, 0); // 8
 
@@ -608,12 +685,32 @@ const TODAY_DAY = getTodayDay();
 
 const STORAGE_KEY = "kidcal:v4";
 
+function emptyStickers() {
+  const out = {};
+  for (const k of KIDS) {
+    out[k.id] = {};
+    for (const s of STICKERS) out[k.id][s.id] = 0;
+  }
+  return out;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (!s.stickers) s.stickers = emptyStickers();
+      // backfill missing kids/stickers from older saves
+      for (const k of KIDS) {
+        if (!s.stickers[k.id]) s.stickers[k.id] = {};
+        for (const st of STICKERS) {
+          if (typeof s.stickers[k.id][st.id] !== "number") s.stickers[k.id][st.id] = 0;
+        }
+      }
+      return s;
+    }
   } catch (e) {}
-  const empty = { stars: {} };
+  const empty = { stars: {}, stickers: emptyStickers() };
   for (const k of KIDS) {
     empty.stars[k.id] = {};
     for (let d = 1; d <= MONTH.daysInMonth; d++) {
@@ -1049,7 +1146,7 @@ function QuickChorePopover({ kid, day, anchorRect, state, onToggle, onAddAll, on
   );
 }
 
-function KidLane({ kid, state, onToggle, onAddAllDay, onClearDay, adminMode, selectedDay, setSelectedDay, popover, openPopover, closePopover }) {
+function KidLane({ kid, state, onToggle, onAddAllDay, onClearDay, onAwardSticker, onRemoveSticker, adminMode, selectedDay, setSelectedDay, popover, openPopover, closePopover }) {
   const total   = useMemo(() => totalPoints(state, kid.id), [state, kid.id]);
   const pct     = Math.min(100, (total / MONTHLY_GOAL) * 100);
   const stage   = carStageMonthly(total);
@@ -1082,6 +1179,15 @@ function KidLane({ kid, state, onToggle, onAddAllDay, onClearDay, adminMode, sel
           <Car stars={total} width={280} />
         </div>
       </div>
+
+      {/* Stickers */}
+      <StickerShelf
+        kid={kid}
+        state={state}
+        adminMode={adminMode}
+        onAward={onAwardSticker}
+        onRemove={onRemoveSticker}
+      />
 
       {/* Track strip */}
       <div className="lane-track">
@@ -1150,6 +1256,40 @@ function KidLane({ kid, state, onToggle, onAddAllDay, onClearDay, adminMode, sel
         </div>
       </div>
     </section>
+  );
+}
+
+function StickerShelf({ kid, state, adminMode, onAward, onRemove }) {
+  const owned = STICKERS.map(s => ({ ...s, count: state.stickers?.[kid.id]?.[s.id] || 0 }));
+  const visible = adminMode ? owned : owned.filter(s => s.count > 0);
+  if (visible.length === 0 && !adminMode) return null;
+  return (
+    <div className="sticker-shelf">
+      <div className="sticker-shelf-tag">{adminMode ? "TAP TO AWARD A STICKER" : "STICKERS"}</div>
+      <div className="sticker-row">
+        {visible.map(s => (
+          <button
+            key={s.id}
+            className={`sticker ${s.count > 0 ? "owned" : "ghost"}`}
+            style={{ "--sg": s.grad, "--st": s.tone }}
+            onClick={(e) => adminMode && onAward(kid.id, s.id, e)}
+            disabled={!adminMode}
+            title={adminMode ? `Award ${s.label}` : s.label}
+          >
+            <span className="sticker-icon">{s.icon}</span>
+            <span className="sticker-label">{s.label}</span>
+            {s.count > 0 && <span className="sticker-count">×{s.count}</span>}
+            {adminMode && s.count > 0 && (
+              <span
+                className="sticker-minus"
+                onClick={(e) => { e.stopPropagation(); onRemove(kid.id, s.id); }}
+                title="Remove one"
+              >−</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1296,6 +1436,41 @@ function App() {
     });
   }
 
+  function awardSticker(kidId, stickerId, e) {
+    if (!adminMode) return;
+    setState(prev => ({
+      ...prev,
+      stickers: {
+        ...prev.stickers,
+        [kidId]: {
+          ...prev.stickers[kidId],
+          [stickerId]: (prev.stickers[kidId]?.[stickerId] || 0) + 1,
+        },
+      },
+    }));
+    if (e) {
+      const r = e.currentTarget.getBoundingClientRect();
+      const k = KIDS.find(x => x.id === kidId);
+      const sticker = STICKERS.find(s => s.id === stickerId);
+      addBurst(r.left + r.width / 2, r.top + r.height / 2, k.color, true, sticker?.icon);
+      if (soundOn) playWoosh();
+    }
+  }
+
+  function removeSticker(kidId, stickerId) {
+    if (!adminMode) return;
+    setState(prev => ({
+      ...prev,
+      stickers: {
+        ...prev.stickers,
+        [kidId]: {
+          ...prev.stickers[kidId],
+          [stickerId]: Math.max(0, (prev.stickers[kidId]?.[stickerId] || 0) - 1),
+        },
+      },
+    }));
+  }
+
   function tryAdmin() {
     if (adminMode) setAdminMode(false);
     else { setShowPin(true); setPin(""); setPinErr(false); }
@@ -1307,16 +1482,18 @@ function App() {
   }
 
   function resetMonth() {
-    if (!confirm("Clear ALL stars for this month? Both kids, every day.")) return;
-    const empty = { stars: {} };
-    for (const k of KIDS) {
-      empty.stars[k.id] = {};
-      for (let d = 1; d <= MONTH.daysInMonth; d++) {
-        empty.stars[k.id][d] = {};
-        for (const c of CHORES) empty.stars[k.id][d][c.id] = false;
+    if (!confirm("Clear ALL stars for this month? Both kids, every day. (Stickers stay.)")) return;
+    setState(prev => {
+      const empty = { stars: {}, stickers: prev.stickers || emptyStickers() };
+      for (const k of KIDS) {
+        empty.stars[k.id] = {};
+        for (let d = 1; d <= MONTH.daysInMonth; d++) {
+          empty.stars[k.id][d] = {};
+          for (const c of CHORES) empty.stars[k.id][d][c.id] = false;
+        }
       }
-    }
-    setState(empty);
+      return empty;
+    });
   }
 
   return (
@@ -1357,6 +1534,8 @@ function App() {
               onToggle={toggle}
               onAddAllDay={addAllDay}
               onClearDay={clearDay}
+              onAwardSticker={awardSticker}
+              onRemoveSticker={removeSticker}
               adminMode={adminMode}
               selectedDay={selectedDay}
               setSelectedDay={setSelectedDay}
