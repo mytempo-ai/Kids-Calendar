@@ -247,7 +247,8 @@ body {
 .lane-month { padding: 18px 22px 22px; background: rgba(0,0,0,0.2); }
 .cal-pane { width: 100%; }
 .cal-head {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(7, 110px); gap: 6px;
+  justify-content: center;
   margin-bottom: 8px;
 }
 .cal-dow {
@@ -257,13 +258,14 @@ body {
   text-align: center; padding: 4px 0;
 }
 .cal-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(7, 110px); gap: 6px;
+  justify-content: center;
 }
 .cal-cell {
   position: relative;
   min-height: 110px;
   background: rgba(255,255,255,0.04);
-  border: 6px solid rgba(255,255,255,0.28);
+  border: 2px solid rgba(255,255,255,0.28);
   border-radius: 10px; cursor: pointer; padding: 10px;
   display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between;
   transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
