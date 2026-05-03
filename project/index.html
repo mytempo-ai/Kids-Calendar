@@ -1346,7 +1346,27 @@ function App() {
   function closePopover() { setPopover(null); }
 
   // ─── Firestore sync ─────────────────────────────────────────────────────────
+  // Normalize remote payload so older docs (no stickers field) don't blow up.
+  function normalizeRemote(remote) {
+    const out = { stars: remote.stars || {}, stickers: remote.stickers || {} };
+    for (const k of KIDS) {
+      if (!out.stickers[k.id]) out.stickers[k.id] = {};
+      for (const s of STICKERS) {
+        if (typeof out.stickers[k.id][s.id] !== "number") out.stickers[k.id][s.id] = 0;
+      }
+      if (!out.stars[k.id]) out.stars[k.id] = {};
+      for (let d = 1; d <= MONTH.daysInMonth; d++) {
+        if (!out.stars[k.id][d]) out.stars[k.id][d] = {};
+        for (const c of CHORES) {
+          if (typeof out.stars[k.id][d][c.id] !== "boolean") out.stars[k.id][d][c.id] = false;
+        }
+      }
+    }
+    return out;
+  }
+
   const skipNextSave = useRef(false);
+  const hasInitialSync = useRef(false); // true once we've heard from Firestore
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -1354,12 +1374,13 @@ function App() {
   useEffect(() => {
     const unsub = window.__stateDoc.onSnapshot(snap => {
       if (!snap.exists) {
-        // No remote doc yet — push current local state so other devices see it
+        // No remote doc yet — seed it with current local state, then unblock saves.
         window.__stateDoc.set(stateRef.current).catch(() => {});
+        hasInitialSync.current = true;
         return;
       }
-      const remote = snap.data();
-      if (!remote || !remote.stars) return;
+      const remote = normalizeRemote(snap.data() || {});
+      hasInitialSync.current = true;
       if (JSON.stringify(remote) === JSON.stringify(stateRef.current)) return;
       skipNextSave.current = true;
       setState(remote);
@@ -1372,6 +1393,7 @@ function App() {
   useEffect(() => {
     saveState(state);
     if (skipNextSave.current) { skipNextSave.current = false; return; }
+    if (!hasInitialSync.current) return; // CRITICAL: don't overwrite remote until we've read it
     if (remoteSaveTimer.current) clearTimeout(remoteSaveTimer.current);
     remoteSaveTimer.current = setTimeout(() => {
       window.__stateDoc.set(state).catch(() => {});
