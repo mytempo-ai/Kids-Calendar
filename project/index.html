@@ -968,54 +968,67 @@ function getCtx() {
   return audioCtx;
 }
 
-let _clickBuf = null;
-let _clickBufLoading = false;
-let _activeClickSrc = null;
+// Generic per-name audio cache. Each named sound is fetched + decoded once,
+// then replayed cheaply on subsequent triggers. Overlapping triggers stop the
+// previous instance so they don't pile up.
+const _audioBufs = {};
+const _audioLoading = {};
+const _audioActive = {};
 
-function preloadClickSound() {
-  if (_clickBuf || _clickBufLoading) return;
+function preloadAudio(name, url) {
+  if (_audioBufs[name] || _audioLoading[name]) return;
   const ctx = getCtx(); if (!ctx) return;
-  _clickBufLoading = true;
-  fetch("drive-by.wav")
+  _audioLoading[name] = true;
+  fetch(url)
     .then(r => r.arrayBuffer())
     .then(ab => ctx.decodeAudioData(ab))
-    .then(buf => { _clickBuf = buf; })
+    .then(buf => { _audioBufs[name] = buf; })
     .catch(() => {})
-    .finally(() => { _clickBufLoading = false; });
+    .finally(() => { _audioLoading[name] = false; });
 }
 
-function playWoosh() {
+function playAudio(name, url, opts = {}) {
+  const capDur = opts.capDur ?? 1.5;
+  const gain = opts.gain ?? 0.85;
   const ctx = getCtx(); if (!ctx) return;
   if (ctx.state === "suspended") ctx.resume();
-  if (!_clickBuf) {
-    preloadClickSound();
+  if (!_audioBufs[name]) {
+    preloadAudio(name, url);
     const start = Date.now();
     const wait = setInterval(() => {
-      if (_clickBuf) { clearInterval(wait); _playClickBuf(); }
+      if (_audioBufs[name]) { clearInterval(wait); _playBuf(name, capDur, gain); }
       else if (Date.now() - start > 2000) clearInterval(wait);
     }, 30);
     return;
   }
-  _playClickBuf();
+  _playBuf(name, capDur, gain);
 }
 
-function _playClickBuf() {
-  const ctx = getCtx(); if (!ctx || !_clickBuf) return;
-  if (_activeClickSrc) { try { _activeClickSrc.stop(); } catch (e) {} _activeClickSrc = null; }
+function _playBuf(name, capDur, gain) {
+  const ctx = getCtx(); if (!ctx || !_audioBufs[name]) return;
+  if (_audioActive[name]) { try { _audioActive[name].stop(); } catch (e) {} _audioActive[name] = null; }
   const src = ctx.createBufferSource();
-  src.buffer = _clickBuf;
+  src.buffer = _audioBufs[name];
   const g = ctx.createGain();
-  g.gain.value = 0.85;
+  g.gain.value = gain;
   const t = ctx.currentTime;
-  const capDur = Math.min(1.5, _clickBuf.duration);
-  g.gain.setValueAtTime(0.85, t + Math.max(0, capDur - 0.15));
-  g.gain.linearRampToValueAtTime(0.0001, t + capDur);
+  const dur = Math.min(capDur, _audioBufs[name].duration);
+  g.gain.setValueAtTime(gain, t + Math.max(0, dur - 0.15));
+  g.gain.linearRampToValueAtTime(0.0001, t + dur);
   src.connect(g).connect(ctx.destination);
   src.start(t);
-  src.stop(t + capDur + 0.02);
-  _activeClickSrc = src;
-  src.onended = () => { if (_activeClickSrc === src) _activeClickSrc = null; };
+  src.stop(t + dur + 0.02);
+  _audioActive[name] = src;
+  src.onended = () => { if (_audioActive[name] === src) _audioActive[name] = null; };
 }
+
+// Original click sound (capped at 1.5s) — every star/sticker except diaper.
+function preloadClickSound() { preloadAudio("click", "drive-by.wav"); }
+function playWoosh() { playAudio("click", "drive-by.wav", { capDur: 1.5, gain: 0.85 }); }
+
+// Diaper sticker sound — distinct, slightly longer cap for the comedic effect.
+function preloadDiaperSound() { preloadAudio("diaper", "diaper.mp3"); }
+function playDiaper() { playAudio("diaper", "diaper.mp3", { capDur: 2.5, gain: 0.95 }); }
 
 function playRev() {
   const ctx = getCtx(); if (!ctx) return;
@@ -1794,7 +1807,10 @@ function App() {
       const k = KIDS.find(x => x.id === kidId);
       const sticker = STICKERS.find(s => s.id === stickerId);
       addBurst(r.left + r.width / 2, r.top + r.height / 2, k.color, true, sticker?.icon);
-      if (soundOn) playWoosh();
+      if (soundOn) {
+        if (stickerId === "diaper") playDiaper();
+        else playWoosh();
+      }
     }
   }
 
@@ -1940,7 +1956,7 @@ function App() {
 // Kick off audio preload on first user gesture
 window.addEventListener("pointerdown", function _firstTap() {
   window.removeEventListener("pointerdown", _firstTap);
-  try { preloadClickSound(); } catch (e) {}
+  try { preloadClickSound(); preloadDiaperSound(); } catch (e) {}
 }, { once: true });
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
