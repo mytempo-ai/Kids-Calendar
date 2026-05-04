@@ -1634,8 +1634,12 @@ function App() {
   function closePopover() { setPopover(null); }
 
   // ─── Firestore sync ─────────────────────────────────────────────────────────
+  // Strategy: each user action writes its specific fields with .update() (no
+  // whole-doc overwrites), so concurrent edits from different devices can't
+  // wipe each other. The snapshot listener still pulls down the merged state.
   const skipNextSave = useRef(false);
-  const hasInitialSync = useRef(false); // true once we've heard from Firestore
+  const hasInitialSync = useRef(false);
+  const migratedFlushed = useRef(false);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -1643,31 +1647,33 @@ function App() {
   useEffect(() => {
     const unsub = window.__stateDoc.onSnapshot(snap => {
       if (!snap.exists) {
-        // No remote doc yet — seed it with current local state, then unblock saves.
+        // No remote doc yet — seed it with current local state.
         window.__stateDoc.set(stateRef.current).catch(() => {});
         hasInitialSync.current = true;
+        migratedFlushed.current = true;
         return;
       }
-      const remote = migrate(snap.data() || {});
+      const raw = snap.data() || {};
+      const migrated = migrate(raw);
       hasInitialSync.current = true;
-      if (JSON.stringify(remote) === JSON.stringify(stateRef.current)) return;
+
+      // One-time cleanup: if the remote schema is older than what migrate
+      // produces (e.g. missing currentKey/archive/stickers), persist the
+      // upgraded shape once so other devices read clean data.
+      if (!migratedFlushed.current && JSON.stringify(raw) !== JSON.stringify(migrated)) {
+        window.__stateDoc.set(migrated).catch(() => {});
+        migratedFlushed.current = true;
+      }
+
+      if (JSON.stringify(migrated) === JSON.stringify(stateRef.current)) return;
       skipNextSave.current = true;
-      setState(remote);
+      setState(migrated);
     }, () => {});
     return () => unsub();
   }, []);
 
-  // Save on every change: local cache + debounced remote write
-  const remoteSaveTimer = useRef(null);
-  useEffect(() => {
-    saveState(state);
-    if (skipNextSave.current) { skipNextSave.current = false; return; }
-    if (!hasInitialSync.current) return; // CRITICAL: don't overwrite remote until we've read it
-    if (remoteSaveTimer.current) clearTimeout(remoteSaveTimer.current);
-    remoteSaveTimer.current = setTimeout(() => {
-      window.__stateDoc.set(state).catch(() => {});
-    }, 250);
-  }, [state]);
+  // Always cache locally (never lose data on tab close).
+  useEffect(() => { saveState(state); }, [state]);
 
   function addBurst(x, y, color, big, emoji) {
     const id = Date.now() + Math.random();
@@ -1675,16 +1681,24 @@ function App() {
     setTimeout(() => setBursts(b => b.filter(x => x.id !== id)), 900);
   }
 
+  // Helper: write a single field path to Firestore (atomic, no whole-doc overwrite)
+  function syncField(path, value) {
+    if (!hasInitialSync.current) return;
+    window.__stateDoc.update({ [path]: value }).catch(() => {});
+  }
+
   function toggle(kidId, day, choreId, points, e) {
     if (!adminMode) return;
     const wasChecked = state.stars[kidId][day][choreId];
+    const newVal = !wasChecked;
     setState(prev => ({
       ...prev,
       stars: {
         ...prev.stars,
-        [kidId]: { ...prev.stars[kidId], [day]: { ...prev.stars[kidId][day], [choreId]: !wasChecked } },
+        [kidId]: { ...prev.stars[kidId], [day]: { ...prev.stars[kidId][day], [choreId]: newVal } },
       },
     }));
+    syncField(`stars.${kidId}.${day}.${choreId}`, newVal);
     if (!wasChecked && e) {
       const r = e.currentTarget.getBoundingClientRect();
       const k = KIDS.find(x => x.id === kidId);
@@ -1700,11 +1714,13 @@ function App() {
 
   function addAllDay(kidId, day) {
     if (!adminMode) return;
-    setState(prev => {
-      const dayMap = { ...prev.stars[kidId][day] };
-      for (const c of CHORES) dayMap[c.id] = true;
-      return { ...prev, stars: { ...prev.stars, [kidId]: { ...prev.stars[kidId], [day]: dayMap } } };
-    });
+    const dayMap = {};
+    for (const c of CHORES) dayMap[c.id] = true;
+    setState(prev => ({
+      ...prev,
+      stars: { ...prev.stars, [kidId]: { ...prev.stars[kidId], [day]: dayMap } },
+    }));
+    syncField(`stars.${kidId}.${day}`, dayMap);
     const k = KIDS.find(x => x.id === kidId);
     const cellEl = document.querySelector(`[data-cell="${kidId}-${day}"]`);
     let cx = window.innerWidth / 2, cy = window.innerHeight / 2;
@@ -1720,11 +1736,13 @@ function App() {
 
   function clearDay(kidId, day) {
     if (!adminMode) return;
-    setState(prev => {
-      const dayMap = {};
-      for (const c of CHORES) dayMap[c.id] = false;
-      return { ...prev, stars: { ...prev.stars, [kidId]: { ...prev.stars[kidId], [day]: dayMap } } };
-    });
+    const dayMap = {};
+    for (const c of CHORES) dayMap[c.id] = false;
+    setState(prev => ({
+      ...prev,
+      stars: { ...prev.stars, [kidId]: { ...prev.stars[kidId], [day]: dayMap } },
+    }));
+    syncField(`stars.${kidId}.${day}`, dayMap);
   }
 
   function awardSticker(kidId, stickerId, e) {
@@ -1739,6 +1757,13 @@ function App() {
         },
       },
     }));
+    // Server-side atomic increment so two devices clicking the same sticker
+    // both count, even if their snapshots were stale.
+    if (hasInitialSync.current) {
+      window.__stateDoc.update({
+        [`stickers.${kidId}.${stickerId}`]: firebase.firestore.FieldValue.increment(1),
+      }).catch(() => {});
+    }
     if (e) {
       const r = e.currentTarget.getBoundingClientRect();
       const k = KIDS.find(x => x.id === kidId);
@@ -1760,6 +1785,14 @@ function App() {
         },
       },
     }));
+    // Use a transaction so we don't go negative under concurrent decrements.
+    if (hasInitialSync.current) {
+      window.__db.runTransaction(async (tx) => {
+        const doc = await tx.get(window.__stateDoc);
+        const cur = doc.data()?.stickers?.[kidId]?.[stickerId] || 0;
+        if (cur > 0) tx.update(window.__stateDoc, { [`stickers.${kidId}.${stickerId}`]: cur - 1 });
+      }).catch(() => {});
+    }
   }
 
   function tryAdmin() {
@@ -1774,14 +1807,15 @@ function App() {
 
   function resetMonth() {
     if (!confirm("Clear ALL stars for THIS month? Both kids, every day. (Stickers and Hall of Fame stay.)")) return;
-    setState(prev => {
-      const fresh = emptyMonthData(MONTH);
-      return {
-        ...prev,
-        stars: fresh.stars,
-        stickers: prev.stickers || emptyStickers(),
-      };
-    });
+    const fresh = emptyMonthData(MONTH);
+    setState(prev => ({
+      ...prev,
+      stars: fresh.stars,
+      stickers: prev.stickers || emptyStickers(),
+    }));
+    if (hasInitialSync.current) {
+      window.__stateDoc.update({ stars: fresh.stars }).catch(() => {});
+    }
   }
 
   return (
