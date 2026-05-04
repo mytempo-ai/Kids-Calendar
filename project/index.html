@@ -809,6 +809,10 @@ body {
     appId: "1:169176426667:web:d516a34c8ed72678caefee",
   });
   window.__db = firebase.firestore();
+  // Offline persistence: caches data + queues writes locally so clicks before the
+  // first network sync are never lost, and the listener fires immediately from
+  // cache on load (no race window where a click could be wiped by a stale snapshot).
+  window.__db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
   window.__stateDoc = window.__db.collection("family").doc("default");
 </script>
 <script type="text/babel">
@@ -892,29 +896,12 @@ function emptyMonthData(monthInfo) {
   return m;
 }
 
-// Migrate any stored shape to the current archive-aware shape AND auto-roll
-// to the current real-world month if needed.
-function migrate(s) {
+// Backfill is PURELY ADDITIVE — never deletes or replaces existing data.
+// Safe to run on any input (local or remote) without risk of data loss.
+function backfill(s) {
   s = s ? { ...s } : {};
-  // Old shape: stars/stickers at root, no currentKey. Treat as May 2026 (the original month).
   if (!s.currentKey) s.currentKey = "2026-05";
   if (!s.archive) s.archive = {};
-
-  const todayKey = currentMonthKey();
-
-  // Auto-roll: if stored month is older than today's month, archive it and start fresh
-  if (s.currentKey !== todayKey) {
-    s.archive[s.currentKey] = {
-      stars: s.stars || {},
-      stickers: s.stickers || emptyStickers(),
-    };
-    const fresh = emptyMonthData(MONTH);
-    s.stars = fresh.stars;
-    s.stickers = fresh.stickers;
-    s.currentKey = todayKey;
-  }
-
-  // Backfill any missing kids/days/stickers in the active month (handles new chores/stickers being added)
   if (!s.stars) s.stars = {};
   if (!s.stickers) s.stickers = {};
   for (const k of KIDS) {
@@ -933,12 +920,38 @@ function migrate(s) {
   return s;
 }
 
+// Forward-only month rollover detection. Uses string comparison on "YYYY-MM" keys
+// (lexicographic order matches chronological order). Returns true ONLY if today is
+// strictly AFTER the stored current month — never rolls backward, even if a clock-
+// skewed device has written a future date.
+function shouldRollMonth(s) {
+  if (!s || !s.currentKey) return false;
+  return currentMonthKey() > s.currentKey;
+}
+
+// Compute the rolled-forward state. Caller saves it.
+function applyRoll(s) {
+  const oldKey = s.currentKey;
+  const archiveEntry = {
+    stars: s.stars || {},
+    stickers: s.stickers || emptyStickers(),
+  };
+  const fresh = emptyMonthData(MONTH);
+  return {
+    ...s,
+    archive: { ...(s.archive || {}), [oldKey]: archiveEntry },
+    stars: fresh.stars,
+    stickers: emptyStickers(),
+    currentKey: currentMonthKey(),
+  };
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return migrate(JSON.parse(raw));
+    if (raw) return backfill(JSON.parse(raw));
   } catch (e) {}
-  return migrate({});
+  return backfill({});
 }
 
 function saveState(s) {
@@ -1634,12 +1647,14 @@ function App() {
   function closePopover() { setPopover(null); }
 
   // ─── Firestore sync ─────────────────────────────────────────────────────────
-  // Strategy: each user action writes its specific fields with .update() (no
-  // whole-doc overwrites), so concurrent edits from different devices can't
-  // wipe each other. The snapshot listener still pulls down the merged state.
+  // Each user action writes its specific field with .update() (no whole-doc
+  // overwrites), so concurrent edits from different devices can't wipe each
+  // other. The snapshot listener pulls down the latest state.
+  // Backfill is purely additive — never destroys data. Month rollover is
+  // forward-only and gated to a single dedicated effect (no auto-roll inside
+  // the snapshot path, which would otherwise ping-pong with clock-skewed devices).
   const skipNextSave = useRef(false);
-  const hasInitialSync = useRef(false);
-  const migratedFlushed = useRef(false);
+  const [hasInitialSync, setHasInitialSync] = useState(false);
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -1649,28 +1664,38 @@ function App() {
       if (!snap.exists) {
         // No remote doc yet — seed it with current local state.
         window.__stateDoc.set(stateRef.current).catch(() => {});
-        hasInitialSync.current = true;
-        migratedFlushed.current = true;
+        setHasInitialSync(true);
         return;
       }
-      const raw = snap.data() || {};
-      const migrated = migrate(raw);
-      hasInitialSync.current = true;
-
-      // One-time cleanup: if the remote schema is older than what migrate
-      // produces (e.g. missing currentKey/archive/stickers), persist the
-      // upgraded shape once so other devices read clean data.
-      if (!migratedFlushed.current && JSON.stringify(raw) !== JSON.stringify(migrated)) {
-        window.__stateDoc.set(migrated).catch(() => {});
-        migratedFlushed.current = true;
-      }
-
-      if (JSON.stringify(migrated) === JSON.stringify(stateRef.current)) return;
+      const remote = backfill(snap.data() || {});
+      setHasInitialSync(true);
+      if (JSON.stringify(remote) === JSON.stringify(stateRef.current)) return;
       skipNextSave.current = true;
-      setState(migrated);
+      setState(remote);
     }, () => {});
     return () => unsub();
   }, []);
+
+  // Forward-only monthly rollover. Runs after initial sync; only the first
+  // device to load on the 1st triggers it. Other devices receive the rolled
+  // state via snapshot. Never rolls backward.
+  const rollAttemptedFor = useRef(null);
+  useEffect(() => {
+    if (!hasInitialSync) return;
+    if (!shouldRollMonth(state)) return;
+    if (rollAttemptedFor.current === state.currentKey) return; // don't loop
+    rollAttemptedFor.current = state.currentKey;
+    const oldKey = state.currentKey;
+    const rolled = applyRoll(state);
+    setState(rolled);
+    // Atomic multi-field update — only writes the rollover fields.
+    window.__stateDoc.update({
+      [`archive.${oldKey}`]: rolled.archive[oldKey],
+      stars: rolled.stars,
+      stickers: rolled.stickers,
+      currentKey: rolled.currentKey,
+    }).catch(() => {});
+  }, [hasInitialSync, state.currentKey]);
 
   // Always cache locally (never lose data on tab close).
   useEffect(() => { saveState(state); }, [state]);
@@ -1683,7 +1708,7 @@ function App() {
 
   // Helper: write a single field path to Firestore (atomic, no whole-doc overwrite)
   function syncField(path, value) {
-    if (!hasInitialSync.current) return;
+    if (!hasInitialSync) return;
     window.__stateDoc.update({ [path]: value }).catch(() => {});
   }
 
@@ -1759,7 +1784,7 @@ function App() {
     }));
     // Server-side atomic increment so two devices clicking the same sticker
     // both count, even if their snapshots were stale.
-    if (hasInitialSync.current) {
+    if (hasInitialSync) {
       window.__stateDoc.update({
         [`stickers.${kidId}.${stickerId}`]: firebase.firestore.FieldValue.increment(1),
       }).catch(() => {});
@@ -1786,7 +1811,7 @@ function App() {
       },
     }));
     // Use a transaction so we don't go negative under concurrent decrements.
-    if (hasInitialSync.current) {
+    if (hasInitialSync) {
       window.__db.runTransaction(async (tx) => {
         const doc = await tx.get(window.__stateDoc);
         const cur = doc.data()?.stickers?.[kidId]?.[stickerId] || 0;
@@ -1813,7 +1838,7 @@ function App() {
       stars: fresh.stars,
       stickers: prev.stickers || emptyStickers(),
     }));
-    if (hasInitialSync.current) {
+    if (hasInitialSync) {
       window.__stateDoc.update({ stars: fresh.stars }).catch(() => {});
     }
   }
